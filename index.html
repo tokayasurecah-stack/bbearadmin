@@ -438,41 +438,6 @@
   .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   .tag { padding: 2px 8px; background: var(--bg-4); border-radius: 4px; font-size: 11px; }
 
-  /* ============ MODAL ============ */
-  dialog {
-    background: var(--bg-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 28px;
-    max-width: 480px;
-    width: 90%;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-  }
-
-  dialog::backdrop {
-    background: rgba(0,0,0,0.75);
-    backdrop-filter: blur(4px);
-  }
-
-  dialog h3 {
-    margin-bottom: 6px;
-    font-size: 17px;
-  }
-
-  dialog .hint {
-    color: var(--text-dim);
-    font-size: 13px;
-    margin-bottom: 20px;
-  }
-
-  dialog .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 20px;
-  }
-
   /* ============ SPINNER ============ */
   .spinner {
     display: inline-block;
@@ -584,17 +549,17 @@
         <div class="stat">
           <div class="label">Total users</div>
           <div class="value" id="sTotalUsers">—</div>
-          <div class="sub" id="sTotalUsersSub">registered accounts</div>
+          <div class="sub">registered accounts</div>
         </div>
         <div class="stat">
           <div class="label">Active subscriptions</div>
           <div class="value" id="sActiveUsers">—</div>
-          <div class="sub" id="sActiveUsersSub">days remaining &gt; 0</div>
+          <div class="sub">days remaining &gt; 0</div>
         </div>
         <div class="stat">
           <div class="label">Pending withdrawals</div>
           <div class="value" id="sPendingWd">—</div>
-          <div class="sub" id="sPendingWdSub">awaiting payout</div>
+          <div class="sub">awaiting payout</div>
         </div>
         <div class="stat">
           <div class="label">Referral earnings</div>
@@ -735,6 +700,12 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <h3>Recent referral events</h3>
+        <p class="hint">Latest 10 events</p>
+        <div id="recentReferrals"></div>
+      </div>
     </section>
 
     <!-- TOOLS -->
@@ -804,6 +775,8 @@ const SERVER_URL = "https://bbear-1.onrender.com";
 let adminKey = localStorage.getItem("bbear_admin_key") || "";
 let usersCache = [];
 let withdrawalsCache = [];
+let walletsCache = [];
+let referralsCache = [];
 let autoRefreshTimer = null;
 
 // ---------------- AUTH ----------------
@@ -912,7 +885,7 @@ function showTab(name) {
 
 async function refreshAll() {
   try {
-    await Promise.all([loadUsers(), loadWithdrawals()]);
+    await Promise.all([loadUsers(), loadWithdrawals(), loadReferrals()]);
     updateStats();
     document.getElementById("refreshInfo").textContent = "Refreshed " + new Date().toLocaleTimeString();
   } catch (e) {
@@ -1014,280 +987,3 @@ async function quickGrant(email) {
       method: "POST",
       body: { days: parseInt(days, 10), reason: "Admin quick grant" },
     });
-    setMsg("dashMsg", `+${days} days granted to ${email}`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("dashMsg", e.message, "error");
-  }
-}
-
-async function quickReset(email) {
-  const pw = prompt(`Set new password for ${email}:`);
-  if (!pw) return;
-  try {
-    await api(`/admin/reset-password/${encodeURIComponent(email)}`, {
-      method: "POST",
-      body: { new_password: pw },
-    });
-    setMsg("dashMsg", `Password reset for ${email}`, "success");
-  } catch (e) {
-    setMsg("dashMsg", e.message, "error");
-  }
-}
-
-async function quickDelete(email) {
-  if (!confirm(`DELETE ${email} permanently? This cannot be undone.`)) return;
-  try {
-    await api(`/admin/user/${encodeURIComponent(email)}`, { method: "DELETE" });
-    setMsg("dashMsg", `Deleted ${email}`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("dashMsg", e.message, "error");
-  }
-}
-
-// ---------------- WITHDRAWALS ----------------
-
-async function loadWithdrawals() {
-  const status = document.getElementById("wdFilter").value;
-  const path = status ? `/admin/withdrawals?status=${status}` : "/admin/withdrawals";
-  withdrawalsCache = await api(path);
-
-  const tbody = document.getElementById("wdTableBody");
-  if (!withdrawalsCache.length) {
-    tbody.innerHTML = `<tr><td colspan="8">
-      <div class="empty"><div class="empty-icon">💸</div>No withdrawals with this status</div>
-    </td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = withdrawalsCache.map((w) => {
-    const dt = w.created_at ? new Date(w.created_at).toLocaleString() : "—";
-    const actions =
-      w.status === "pending" || w.status === "processing"
-        ? `<div class="actions-cell">
-             <button class="btn btn-primary btn-sm" onclick="completeWd(${w.id})">Complete</button>
-             <button class="btn btn-danger btn-sm" onclick="failWd(${w.id})">Fail</button>
-           </div>`
-        : `<span class="muted">—</span>`;
-    return `
-      <tr>
-        <td class="mono">${w.id}</td>
-        <td>${escapeHtml(w.email)}</td>
-        <td class="mono">${w.amount_ugx.toLocaleString()} UGX</td>
-        <td class="mono">${escapeHtml(w.phone)}</td>
-        <td>${escapeHtml(w.network)}</td>
-        <td>${statusBadge(w.status)}</td>
-        <td class="muted">${dt}</td>
-        <td>${actions}</td>
-      </tr>`;
-  }).join("");
-}
-
-function statusBadge(status) {
-  const map = {
-    pending: "yellow",
-    processing: "blue",
-    completed: "green",
-    failed: "red",
-  };
-  return `<span class="badge ${map[status] || "grey"}">${status}</span>`;
-}
-
-async function completeWd(id) {
-  const note = prompt("Note (optional):", "Sent via NylonPay") || "";
-  try {
-    await api(`/admin/withdrawals/${id}/complete`, {
-      method: "POST",
-      body: { note },
-    });
-    setMsg("wdMsg", `Withdrawal #${id} marked completed`, "success");
-    await loadWithdrawals();
-    await loadUsers();
-  } catch (e) {
-    setMsg("wdMsg", e.message, "error");
-  }
-}
-
-async function failWd(id) {
-  const note = prompt("Reason for failure:", "Failed — refunded") || "";
-  if (!confirm(`Mark withdrawal #${id} as failed and refund the user?`)) return;
-  try {
-    await api(`/admin/withdrawals/${id}/fail`, {
-      method: "POST",
-      body: { note },
-    });
-    setMsg("wdMsg", `Withdrawal #${id} failed and refunded`, "success");
-    await loadWithdrawals();
-  } catch (e) {
-    setMsg("wdMsg", e.message, "error");
-  }
-}
-
-async function processBatch() {
-  if (!confirm("Process all pending withdrawals? NylonPay will be called for each one.")) return;
-  setMsg("wdMsg", "Processing...", "info");
-  try {
-    const res = await api("/admin/withdrawals/process-batch", { method: "POST" });
-    setMsg("wdMsg", `Processed ${res.processed} requests`, "success");
-    await loadWithdrawals();
-    await loadUsers();
-  } catch (e) {
-    setMsg("wdMsg", e.message, "error");
-  }
-}
-
-// ---------------- REFERRALS ----------------
-
-async function loadReferrals() {
-  // Until /admin/wallets exists, derive from users
-  const tbody = document.getElementById("referralsTableBody");
-  tbody.innerHTML = `<tr><td colspan="4">
-    <div class="empty">
-      <div class="empty-icon">🎁</div>
-      <div>Referral detail view needs <code>/admin/wallets</code> endpoint</div>
-      <div class="muted" style="margin-top:8px">Add it to the backend to enable this tab</div>
-    </div>
-  </td></tr>`;
-}
-
-// ---------------- DASHBOARD STATS ----------------
-
-function updateStats() {
-  const active = usersCache.filter((u) => u.days_left > 0).length;
-  const pending = withdrawalsCache.filter((w) => w.status === "pending").length;
-  document.getElementById("sTotalUsers").textContent = usersCache.length;
-  document.getElementById("sActiveUsers").textContent = active;
-  document.getElementById("sPendingWd").textContent = pending;
-  document.getElementById("sTotalReferrals").textContent = "—";
-}
-
-// ---------------- TOOLS ----------------
-
-async function toolGrant() {
-  const email = document.getElementById("toolGrantEmail").value.trim();
-  const days = parseInt(document.getElementById("toolGrantDays").value, 10);
-  const reason = document.getElementById("toolGrantReason").value.trim();
-  if (!email || !days) return setMsg("toolsMsg", "Email and days are required", "error");
-  try {
-    const res = await api(`/admin/grant-days/${encodeURIComponent(email)}`, {
-      method: "POST",
-      body: { days, reason: reason || null },
-    });
-    setMsg("toolsMsg", `Granted ${days}d to ${email}. Now ${res.days_left}d left.`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("toolsMsg", e.message, "error");
-  }
-}
-
-async function toolSet() {
-  const email = document.getElementById("toolSetEmail").value.trim();
-  const dateStr = document.getElementById("toolSetDate").value;
-  if (!email || !dateStr) return setMsg("toolsMsg", "Email and date required", "error");
-  const iso = new Date(dateStr).toISOString().replace("Z", "");
-  try {
-    const res = await api(`/admin/set-subscription/${encodeURIComponent(email)}`, {
-      method: "POST",
-      body: { subscription_end: iso },
-    });
-    setMsg("toolsMsg", `Set ${email} to expire on ${res.subscription_end}`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("toolsMsg", e.message, "error");
-  }
-}
-
-async function toolReset() {
-  const email = document.getElementById("toolResetEmail").value.trim();
-  const pass = document.getElementById("toolResetPass").value;
-  if (!email || !pass) return setMsg("toolsMsg", "Email and password required", "error");
-  try {
-    await api(`/admin/reset-password/${encodeURIComponent(email)}`, {
-      method: "POST",
-      body: { new_password: pass },
-    });
-    setMsg("toolsMsg", `Password reset for ${email}`, "success");
-    document.getElementById("toolResetPass").value = "";
-  } catch (e) {
-    setMsg("toolsMsg", e.message, "error");
-  }
-}
-
-async function toolRevoke() {
-  const email = document.getElementById("toolRevokeEmail").value.trim();
-  if (!email) return;
-  if (!confirm(`Revoke subscription of ${email}?`)) return;
-  try {
-    await api(`/admin/revoke/${encodeURIComponent(email)}`, { method: "POST" });
-    setMsg("toolsMsg", `Revoked ${email}`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("toolsMsg", e.message, "error");
-  }
-}
-
-async function toolDelete() {
-  const email = document.getElementById("toolDeleteEmail").value.trim();
-  if (!email) return;
-  if (!confirm(`PERMANENTLY DELETE ${email}? This cannot be undone.`)) return;
-  try {
-    await api(`/admin/user/${encodeURIComponent(email)}`, { method: "DELETE" });
-    setMsg("toolsMsg", `Deleted ${email}`, "success");
-    await loadUsers();
-  } catch (e) {
-    setMsg("toolsMsg", e.message, "error");
-  }
-}
-
-// ---------------- UTILS ----------------
-
-function escapeHtml(s) {
-  if (s == null) return "";
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function jsEsc(s) {
-  return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"');
-}
-
-function setMsg(id, text, type) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = "msg show " + (type || "info");
-  el.textContent = text;
-  if (type === "success") {
-    setTimeout(() => {
-      if (el.textContent === text) {
-        el.className = "msg";
-        el.textContent = "";
-      }
-    }, 5000);
-  }
-}
-
-// ---------------- BOOT ----------------
-
-(function boot() {
-  document.getElementById("serverUrlDisplay").textContent = SERVER_URL.replace(/^https?:\/\//, "");
-
-  if (adminKey) {
-    fetch(SERVER_URL + "/admin/users", { headers: { "X-Admin-Key": adminKey } })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        usersCache = data;
-        enterApp();
-      })
-      .catch(() => {
-        localStorage.removeItem("bbear_admin_key");
-        adminKey = "";
-      });
-  }
-
-  document.getElementById("adminKeyInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") doLogin();
-  });
-})();
-</script>
-</body>
-</html>
